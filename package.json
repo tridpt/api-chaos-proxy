@@ -1,0 +1,21 @@
+{
+  "name": "api-chaos-proxy",
+  "version": "2.0.0",
+  "description": "ChaosForge v2.0 — Trạm Thử Thách Độ Bền Frontend: HTTP/SSE/WebSocket/GraphQL Chaos Reverse Proxy, 401 Refresh Race Trap, Chrome .HAR + Auto-OpenAPI 3.0, GameDay Timeline & Floating HUD",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test_smoke.js"
+  },
+  "keywords": [
+    "chaos-engineering",
+    "reverse-proxy",
+    "api-mocking",
+    "frontend-resilience",
+    "offline-replay",
+    "json-mutator",
+    "breakpoint-proxy"
+  ],
+  "author": "AI_App Ecosystem",
+  "license": "MIT"
+}

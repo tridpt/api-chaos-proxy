@@ -1,0 +1,1000 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChaosForge v2.0 ⚡ — API, AI Stream, WebSocket &amp; Offline Chaos Proxy</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <!-- TOP COMMAND HEADER -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-logo">⚡</div>
+      <div>
+        <div class="brand-title">
+          ChaosForge <span class="brand-tag">v2.0 · PORT 4190 · PROXY 4191</span>
+        </div>
+        <div class="brand-sub">HTTP · AI SSE Stream · WebSocket · GraphQL · 401 Race · HAR &amp; OpenAPI</div>
+      </div>
+    </div>
+
+    <!-- ROUTE PIPELINE BAR -->
+    <div class="pipeline-bar">
+      <div class="pipe-node proxy-node" title="Trỏ API_BASE_URL (HTTP & WebSocket) của Frontend vào địa chỉ này">
+        <span class="pipe-label">PROXY GATEWAY</span>
+        <code id="proxyGatewayUrl">http://localhost:4191</code>
+        <button class="btn-mini" id="btnCopyProxyUrl" title="Copy Proxy URL">Copy</button>
+      </div>
+      <span class="pipe-arrow">➔</span>
+      <div class="pipe-node target-node">
+        <span class="pipe-label">UPSTREAM ĐÍCH</span>
+        <input
+          type="text"
+          id="inputTargetUrl"
+          class="target-input"
+          placeholder="http://localhost:8000/api"
+          spellcheck="false"
+        />
+        <select id="selectQuickTarget" class="quick-target-select" title="Chọn nhanh đích mẫu">
+          <option value="">▾ Đích nhanh</option>
+          <option value="http://127.0.0.1:4190/demo-api">🧪 PayFlow Demo v2 (REST+SSE+WS+GQL)</option>
+          <option value="https://jsonplaceholder.typicode.com">🌐 JSONPlaceholder (Public HTTPS)</option>
+          <option value="http://127.0.0.1:8000">🐍 Local FastAPI / Agent (:8000)</option>
+          <option value="http://127.0.0.1:3000">🟢 Local Node / Next.js (:3000)</option>
+          <option value="http://127.0.0.1:5000">🌶️ Local Flask / Python (:5000)</option>
+          <option value="http://127.0.0.1:4080">📡 NetPulse Webhook (:4080)</option>
+        </select>
+        <button class="btn-mini btn-accent" id="btnSaveTarget">Lưu</button>
+      </div>
+    </div>
+
+    <!-- MASTER CONTROLS -->
+    <div class="master-controls">
+      <div class="mode-switch" id="modeSwitch">
+        <button data-mode="PASSTHROUGH" class="mode-btn" title="Chuyển tiếp sạch không tiêm lỗi">🟢 Xuyên Suốt</button>
+        <button data-mode="CHAOS" class="mode-btn active" title="Kích hoạt tiêm độ trễ, lỗi HTTP, SSE/WS & biến đổi JSON">🔥 Hỗn Loạn</button>
+        <button data-mode="OFFLINE_REPLAY" class="mode-btn" title="Ngắt Backend thật, phát lại từ Cuộn băng Cassette / HAR">📼 Phát Offline</button>
+      </div>
+
+      <button class="pill-toggle rec-toggle" id="btnToggleRecord" title="Ghi lại toàn bộ phiên API vào Cuộn băng Cassette">
+        <span class="dot"></span> <span id="recLabel">REC</span>
+      </button>
+
+      <button class="pill-toggle bp-toggle" id="btnQuickBreakpoint" title="Bật/Tắt bắt sống gói tin Response để sửa JSON trực tiếp">
+        ⏸ Bắt Sống <span class="bp-badge hidden" id="bpCountBadge">0</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- TELEMETRY RIBBON -->
+  <section class="telemetry-strip">
+    <div class="metric-card">
+      <span class="metric-label">Tổng Gói Qua Trạm</span>
+      <strong class="metric-value" id="mTotalReq">0</strong>
+      <span class="metric-sub" id="sseStatusText">● SSE Đang kết nối...</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Độ Trễ TB / P95</span>
+      <strong class="metric-value"><span id="mAvgLat">0</span> <small>ms</small></strong>
+      <span class="metric-sub">P95: <b id="mP95Lat">0 ms</b></span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Tỷ Lệ Lỗi Đường Truyền</span>
+      <strong class="metric-value text-danger"><span id="mErrRate">0</span><small>%</small></strong>
+      <span class="metric-sub"><span id="mErrCount">0</span> gói 4xx/5xx/Drop</span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Đột Biến JSON &amp; GQL</span>
+      <strong class="metric-value text-purple" id="mMutatedCount">0</strong>
+      <span class="metric-sub">WebSocket mở: <b id="mWsCount" class="text-cyan">0</b></span>
+    </div>
+    <div class="metric-card">
+      <span class="metric-label">Frontend Tự Ngắt Timeout</span>
+      <strong class="metric-value text-cyan" id="mAbortedCount">0</strong>
+      <span class="metric-sub">AbortController hoạt động</span>
+    </div>
+    <div class="metric-card" id="doubleSubmitCard">
+      <span class="metric-label">Lỗi Race (Double-Pay / 401)</span>
+      <strong class="metric-value text-warning"><span id="mDoubleSubmit">0</span> / <span id="mAuthRace">0</span></strong>
+      <span class="metric-sub">Trừ tiền đúp / Bão Refresh 401</span>
+    </div>
+  </section>
+
+  <!-- ACTIVE TIMELINE GAMEDAY BANNER -->
+  <section id="timelineLiveBanner" class="timeline-live-banner hidden">
+    <div class="tl-banner-left">
+      <span class="tl-badge">🎬 GAMEDAY ĐANG CHẠY</span>
+      <strong id="tlBannerName">Flash-Sale 32s</strong>
+      <span class="tl-stage-pill" id="tlBannerStage">Pha 1...</span>
+    </div>
+    <div class="tl-progress-wrap">
+      <div class="tl-progress-bar" id="tlBannerBar" style="width: 0%"></div>
+    </div>
+    <div class="tl-banner-right">
+      <code id="tlBannerClock">0.0s / 32s</code>
+      <button class="btn-mini btn-danger" id="btnStopTimelineBanner">⏹ Dừng</button>
+    </div>
+  </section>
+
+  <!-- LIVE BREAKPOINT SURGEON BANNER / MODAL -->
+  <section id="breakpointDrawer" class="bp-drawer hidden">
+    <div class="bp-drawer-header">
+      <div class="bp-title-wrap">
+        <span class="bp-pulse-icon">⏸</span>
+        <div>
+          <h3>PHẪU THUẬT GÓI TIN ĐANG BAY (LIVE PACKET SURGEON)</h3>
+          <p id="bpMetaSubtitle">Đang giữ gói tin trên đường truyền — Frontend đang chờ phản hồi của bạn!</p>
+        </div>
+      </div>
+      <div class="bp-header-actions">
+        <span class="bp-timer" id="bpCountdown">Tự phóng sau: 60s</span>
+        <span class="bp-queue-info" id="bpQueueInfo">1 đang chờ</span>
+      </div>
+    </div>
+
+    <div class="bp-surgeon-body">
+      <div class="bp-QuickCorruptBar">
+        <span class="corrupt-label">⚡ Tiêm nhanh Edge-Case vào ô sửa:</span>
+        <button class="btn-chip" data-bp-preset="null_arrays">🕳️ Biến mảng thành null</button>
+        <button class="btn-chip" data-bp-preset="negative_money">💸 Số dư / Giá âm (-999tr)</button>
+        <button class="btn-chip" data-bp-preset="truncate_json">✂️ Cắt cụt JSON lỗi cú pháp</button>
+        <button class="btn-chip" data-bp-preset="err_500">💥 Đổi thành 500 Crash</button>
+        <button class="btn-chip" data-bp-preset="err_429">⏳ Đổi thành 429 Quá tải</button>
+        <button class="btn-chip" data-bp-preset="restore_orig">↩️ Khôi phục JSON gốc</button>
+      </div>
+
+      <div class="bp-fields-row">
+        <div class="form-group bp-status-col">
+          <label>HTTP Status Trả Về</label>
+          <input type="number" id="bpStatusInput" value="200" min="100" max="599" />
+        </div>
+        <div class="form-group bp-ct-col">
+          <label>Content-Type Header</label>
+          <input type="text" id="bpContentTypeInput" value="application/json; charset=utf-8" />
+        </div>
+        <div class="form-group bp-json-valid-col">
+          <label>Kiểm Tra Cú Pháp JSON</label>
+          <div id="bpJsonValidity" class="json-valid-pill ok">✓ JSON Hợp lệ</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Nội Dung Payload Trả Về Cho Frontend (Sửa trực tiếp tại đây):</label>
+        <textarea id="bpBodyEditor" rows="8" spellcheck="false"></textarea>
+      </div>
+
+      <div class="bp-footer-btns">
+        <button class="btn btn-primary" id="btnBpResume">🚀 Phóng Gói Tin Đã Sửa Về Frontend</button>
+        <button class="btn btn-danger" id="btnBpDrop">🔌 Ngắt Đứt Kết Nối TCP (Socket Destroy)</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- MAIN WORKSPACE TABS -->
+  <nav class="workspace-tabs">
+    <button class="tab-btn active" data-tab="cockpit">🎛️ Bàn Điều Khiển Chaos &amp; Gói Tin</button>
+    <button class="tab-btn" data-tab="lab">🧪 Đấu Trường Va Đập UI (REST · AI SSE · WS · 401 · GQL)</button>
+    <button class="tab-btn" data-tab="timeline">🎬 Timeline Kịch Bản, Báo Cáo &amp; OpenAPI 3.0</button>
+    <button class="tab-btn" data-tab="rules">⚡ Luật Endpoint &amp; Mock (<span id="rulesCountTab">0</span>)</button>
+    <button class="tab-btn" data-tab="cassettes">📼 Băng Offline &amp; Chrome .HAR (<span id="cassettesCountTab">0</span>)</button>
+    <button class="tab-btn" data-tab="integrate">💉 Floating HUD &amp; Ghép Nối Dự Án</button>
+  </nav>
+
+  <main class="workspace-container">
+    <!-- ================================================================== -->
+    <!-- TAB 1: CHAOS COCKPIT & LIVE TRAFFIC INSPECTOR                      -->
+    <!-- ================================================================== -->
+    <section class="tab-pane active" id="tab-cockpit">
+      <!-- 1-Click Scenario Presets -->
+      <div class="presets-bar" id="presetsGrid"></div>
+
+      <!-- Row 1: Network Chaos + JSON Wire Mutator -->
+      <div class="chaos-controls-grid">
+        <!-- LEFT CARD: NETWORK & FAULT INJECTION -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>🌐 Giả Lập Mạng Chập Chờn &amp; Lỗi Máy Chủ</h3>
+            <div class="panel-actions">
+              <label class="inline-check" title="Tự động thêm Access-Control-Allow-Origin để trình duyệt không bị chặn CORS khi gọi qua cổng 4191">
+                <input type="checkbox" id="chkCorsBypass" checked /> Tự mở CORS Proxy
+              </label>
+              <button class="btn-mini" id="btnResetClean">Về 0ms Sạch</button>
+            </div>
+          </div>
+
+          <div class="sliders-grid">
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Độ trễ nền (Base Latency)</label>
+                <span class="slider-val" id="valLatencyMs">0 ms</span>
+              </div>
+              <input type="range" id="rngLatencyMs" min="0" max="5000" step="50" value="0" />
+            </div>
+
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Độ rung mạng (Random Jitter ±)</label>
+                <span class="slider-val" id="valJitterMs">0 ms</span>
+              </div>
+              <input type="range" id="rngJitterMs" min="0" max="3000" step="50" value="0" />
+            </div>
+
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Xác suất vọt trễ P99 (Tail Spike 3.5s+)</label>
+                <span class="slider-val" id="valSpikeRate">0%</span>
+              </div>
+              <input type="range" id="rngSpikeRate" min="0" max="100" step="5" value="0" />
+            </div>
+
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Tỷ lệ rớt lỗi HTTP (500 / 503 / 429)</label>
+                <span class="slider-val text-danger" id="valErrorRate">0%</span>
+              </div>
+              <input type="range" id="rngErrorRate" min="0" max="100" step="5" value="0" />
+            </div>
+
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Đứt kết nối TCP đột ngột (Socket Reset)</label>
+                <span class="slider-val text-danger" id="valDropRate">0%</span>
+              </div>
+              <input type="range" id="rngDropRate" min="0" max="100" step="5" value="0" />
+            </div>
+
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Treo kết nối 10s (Bẫy thiếu Timeout)</label>
+                <span class="slider-val text-warning" id="valHangRate">0%</span>
+              </div>
+              <input type="range" id="rngHangRate" min="0" max="100" step="5" value="0" />
+            </div>
+
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Bóp băng thông nhỏ giọt (0 = Không giới hạn)</label>
+                <span class="slider-val" id="valThrottleKbps">Không giới hạn</span>
+              </div>
+              <input type="range" id="rngThrottleKbps" min="0" max="200" step="4" value="0" />
+            </div>
+
+            <div class="slider-item">
+              <div class="slider-top">
+                <label>Phá hủy CORS Header (Test Failed to fetch)</label>
+                <span class="slider-val" id="valStripCorsRate">0%</span>
+              </div>
+              <input type="range" id="rngStripCorsRate" min="0" max="100" step="10" value="0" />
+            </div>
+          </div>
+
+          <div class="error-codes-row">
+            <span class="row-label">Tập mã lỗi HTTP tiêm ngẫu nhiên:</span>
+            <div class="code-chips" id="errorCodeChips">
+              <label class="chip-check"><input type="checkbox" value="500" checked /> 500 Crash</label>
+              <label class="chip-check"><input type="checkbox" value="502" checked /> 502 Bad GW</label>
+              <label class="chip-check"><input type="checkbox" value="503" checked /> 503 Overload</label>
+              <label class="chip-check"><input type="checkbox" value="504" /> 504 Timeout</label>
+              <label class="chip-check"><input type="checkbox" value="429" checked /> 429 Rate Limit</label>
+              <label class="chip-check"><input type="checkbox" value="401" /> 401 Token Exp</label>
+              <label class="chip-check"><input type="checkbox" value="403" /> 403 Forbidden</label>
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT CARD: WIRE JSON EDGE-CASE MUTATOR & LIVE BREAKPOINTS -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>🧬 Đột Biến Payload JSON Trên Đường Truyền</h3>
+            <label class="switch-pill">
+              <input type="checkbox" id="chkMutatorEnabled" />
+              <span>Kích hoạt Đột biến</span>
+            </label>
+          </div>
+
+          <div class="mutator-body">
+            <div class="mutator-checks-grid">
+              <label class="mut-card">
+                <input type="checkbox" id="chkMutNullify" />
+                <div>
+                  <strong>🕳️ Nullify Trường Đích</strong>
+                  <small>Đổi mảng/object sang <code>null</code> (Bắt lỗi <code>.map</code>)</small>
+                </div>
+              </label>
+
+              <label class="mut-card">
+                <input type="checkbox" id="chkMutEmptyArr" />
+                <div>
+                  <strong>📭 Làm Rỗng Mọi Mảng <code>[]</code></strong>
+                  <small>Kiểm tra giao diện Empty State</small>
+                </div>
+              </label>
+
+              <label class="mut-card">
+                <input type="checkbox" id="chkMutOverflow" />
+                <div>
+                  <strong>📏 Chuỗi Siêu Dài &amp; Tràn Khung</strong>
+                  <small>Nhân bản chuỗi x6 + từ dài test vỡ CSS</small>
+                </div>
+              </label>
+
+              <label class="mut-card">
+                <input type="checkbox" id="chkMutTypeConfuse" />
+                <div>
+                  <strong>🔀 Đảo Kiểu Số/Chuỗi &amp; Tiền Âm</strong>
+                  <small>Biến giá tiền thành <code>-99999999</code></small>
+                </div>
+              </label>
+
+              <label class="mut-card">
+                <input type="checkbox" id="chkMutTruncate" />
+                <div>
+                  <strong>✂️ Cắt Cụt JSON Giữa Chừng</strong>
+                  <small>Trả <code>200 OK</code> nhưng hỏng cú pháp JSON</small>
+                </div>
+              </label>
+
+              <label class="mut-card">
+                <input type="checkbox" id="chkMutHtml" />
+                <div>
+                  <strong>🧱 Trả Trang Lỗi HTML Nginx</strong>
+                  <small>Giả lập Proxy trả HTML thay vì JSON</small>
+                </div>
+              </label>
+            </div>
+
+            <div class="mutator-inputs-row">
+              <div class="form-group">
+                <label>Trường ưu tiên biến thành <code>null</code>:</label>
+                <input type="text" id="inpMutTargetKeys" placeholder="items, products, user.avatar, balance" spellcheck="false" />
+              </div>
+              <div class="form-group">
+                <div class="label-with-link">
+                  <label>Ghi đè JSON theo đường dẫn chấm:</label>
+                  <button class="btn-link" id="btnSampleOverride" type="button">+ Mẫu Số dư = 0</button>
+                </div>
+                <input type="text" id="inpJsonOverrides" placeholder='{"wallet.balance": 0, "user.tier": "LOCKED"}' spellcheck="false" />
+              </div>
+            </div>
+
+            <div class="bp-config-strip">
+              <div class="bp-strip-left">
+                <strong>⏸ Bắt Sống (Breakpoint):</strong>
+                <label class="inline-check"><input type="checkbox" id="chkBpRes" /> Giữ Response</label>
+                <label class="inline-check"><input type="checkbox" id="chkBpReq" /> Giữ Request</label>
+              </div>
+              <div class="bp-strip-right">
+                <span>Lọc Path:</span>
+                <input type="text" id="inpBpPattern" value="*" placeholder="/checkout*" class="bp-pattern-inp" />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Row 2 (NEW v2.0): AI SSE / WebSocket Chaos + Auth 401 Race / GraphQL Chaos -->
+      <div class="chaos-controls-grid">
+        <!-- AI SSE STREAM & WEBSOCKET CHAOS -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>🤖 Hỗn Loạn Luồng AI Streaming (SSE) &amp; WebSocket Tunnel</h3>
+            <div class="panel-actions">
+              <label class="inline-check"><input type="checkbox" id="chkStreamChaos" /> Bật SSE Chaos</label>
+              <label class="inline-check"><input type="checkbox" id="chkWsChaos" /> Bật WS Chaos</label>
+            </div>
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>Trễ mỗi Token SSE (ms)</label>
+              <input type="number" id="inpStreamTokenDelay" value="60" min="0" max="2000" />
+            </div>
+            <div class="form-group">
+              <label>Khựng giữa câu Stall (ms)</label>
+              <input type="number" id="inpStreamStallMs" value="2200" min="0" max="15000" />
+            </div>
+            <div class="form-group">
+              <label>% Cắt đứt Stream giữa chừng</label>
+              <input type="number" id="inpStreamDropRate" value="0" min="0" max="100" />
+            </div>
+          </div>
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>% Chèn Frame SSE hỏng JSON</label>
+              <input type="number" id="inpStreamCorruptRate" value="0" min="0" max="100" />
+            </div>
+            <div class="form-group">
+              <label>Trễ khung tin WebSocket (ms)</label>
+              <input type="number" id="inpWsDelayMs" value="0" min="0" max="5000" />
+            </div>
+            <div class="form-group">
+              <label>Tự rớt WS sau (giây, 0=tắt)</label>
+              <input type="number" id="inpWsAutoDropSec" value="0" min="0" max="300" />
+            </div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+            <span class="text-muted" style="font-size:11.5px;">Kiểm tra khả năng tự nối lại (Auto-Reconnect) của ứng dụng Realtime:</span>
+            <button class="btn-mini btn-danger" id="btnKillAllWs">🔌 Cắt Đứt Mọi WebSocket Đang Mở</button>
+          </div>
+        </div>
+
+        <!-- AUTH 401 BURST TRAP & GRAPHQL CHAOS -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>🔐 Bẫy Xác Thực 401 Refresh Race &amp; 🕸️ GraphQL Chaos</h3>
+            <div class="panel-actions">
+              <label class="inline-check"><input type="checkbox" id="chkGqlChaos" /> Bật GraphQL Chaos</label>
+            </div>
+          </div>
+
+          <div class="bp-config-strip" style="margin-bottom:10px;">
+            <div>
+              <strong>🔐 Bẫy Hết Hạn Token Đồng Loạt (401 Burst):</strong>
+              <div style="font-size:11px;color:var(--text-muted);">
+                Ép mọi API có Token trả <code>401</code> cho tới khi gọi <code>/auth/refresh</code> — Bắt lỗi gọi Refresh chồng chéo!
+              </div>
+            </div>
+            <button class="btn-mini btn-accent" id="btnExpireAuthNow">🔥 Kích Nổ 401 Ngay</button>
+          </div>
+
+          <div class="form-row-3">
+            <div class="form-group">
+              <label>GQL Operation Đích (<code>*</code> = tất cả)</label>
+              <input type="text" id="inpGqlTargets" value="*" placeholder="GetWalletDashboard" spellcheck="false" />
+            </div>
+            <div class="form-group">
+              <label>% GQL 200 OK (data: null + errors)</label>
+              <input type="number" id="inpGqlErrorsRate" value="0" min="0" max="100" />
+            </div>
+            <div class="form-group">
+              <label>% GQL Partial Data + Errors</label>
+              <input type="number" id="inpGqlPartialRate" value="100" min="0" max="100" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- LIVE TRAFFIC STREAM + PACKET DIFF INSPECTOR -->
+      <div class="traffic-workbench">
+        <!-- Traffic Stream List -->
+        <div class="panel traffic-list-panel">
+          <div class="panel-header">
+            <h3>📡 Luồng Gói Tin Thời Gian Thực (<span id="trafficCountLabel">0</span>)</h3>
+            <div class="traffic-toolbar">
+              <input type="text" id="inpTrafficFilter" placeholder="Lọc path, GQL, SSE, mã lỗi..." class="filter-inp" />
+              <select id="selTrafficFilterType" class="filter-sel">
+                <option value="ALL">Tất cả</option>
+                <option value="CHAOS">Bị Can Thiệp / Lỗi</option>
+                <option value="MUTATED">Đột Biến JSON / GQL</option>
+                <option value="ERR">Lỗi 4xx / 5xx / Drop</option>
+              </select>
+              <button class="btn-mini btn-accent" id="btnFireProbe" title="Bắn nhanh 1 gói thử qua Proxy 4191">⚡ Bắn Thử</button>
+              <button class="btn-mini" id="btnExportTrafficHar" title="Xuất luồng gói tin ra chuẩn Chrome .HAR">📤 .HAR</button>
+              <button class="btn-mini" id="btnClearTraffic" title="Xóa lịch sử gói tin">🗑️ Xóa</button>
+            </div>
+          </div>
+
+          <div class="traffic-table-wrap">
+            <table class="traffic-table">
+              <thead>
+                <tr>
+                  <th>Giờ</th>
+                  <th>Method</th>
+                  <th>Đường Dẫn / GQL Op</th>
+                  <th>Nguồn</th>
+                  <th>Status</th>
+                  <th>Thời Gian</th>
+                  <th>Nhãn Can Thiệp</th>
+                </tr>
+              </thead>
+              <tbody id="trafficTableBody">
+                <tr>
+                  <td colspan="7" class="empty-cell">
+                    Chưa có gói tin nào đi qua cổng Proxy <code>:4191</code>. Bấm <b>⚡ Bắn Thử</b> hoặc sang tab <b>🧪 Đấu Trường Va Đập UI</b>!
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Deep Packet & Diff Inspector -->
+        <div class="panel inspector-panel">
+          <div class="panel-header">
+            <h3>🔬 Giải Phẫu Gói Tin &amp; So Sánh JSON Diff</h3>
+            <div class="inspector-actions" id="inspectorActionBtns">
+              <button class="btn-mini" id="btnReplaySelected" disabled>🔁 Phát Lại</button>
+              <button class="btn-mini" id="btnCreateRuleFromTx" disabled>📌 Tạo Mock Rule</button>
+              <button class="btn-mini" id="btnCopyCurl" disabled>📋 Copy cURL</button>
+            </div>
+          </div>
+
+          <div id="inspectorEmpty" class="inspector-empty">
+            Click vào một gói tin bên trái để mổ xẻ thời gian trễ, headers và đối chiếu <b>JSON Gốc từ Backend</b> vs <b>JSON Đã Đột Biến trên đường truyền</b>.
+          </div>
+
+          <div id="inspectorContent" class="inspector-content hidden">
+            <div class="tx-summary-bar" id="txSummaryBar"></div>
+            <div class="timing-bar-wrap" id="txTimingBreakdown"></div>
+
+            <div class="sub-tabs" id="inspectorSubTabs">
+              <button class="sub-tab active" data-sub="diff">🧬 Response &amp; So Sánh Đột Biến</button>
+              <button class="sub-tab" data-sub="req">📤 Request Body &amp; Fetch</button>
+              <button class="sub-tab" data-sub="headers">🗂️ HTTP Headers</button>
+            </div>
+
+            <div class="sub-pane active" id="sub-diff">
+              <div id="mutationBanner" class="mutation-banner hidden"></div>
+              <div class="diff-columns" id="diffColumnsWrap">
+                <div class="code-box" id="origBoxWrap">
+                  <div class="code-box-title">📥 JSON Gốc Từ Backend / Cassette</div>
+                  <pre id="preOrigBody"></pre>
+                </div>
+                <div class="code-box">
+                  <div class="code-box-title">📤 Payload Thực Tế Trả Về Cho Frontend</div>
+                  <pre id="preFinalBody"></pre>
+                </div>
+              </div>
+            </div>
+
+            <div class="sub-pane" id="sub-req">
+              <div class="code-box">
+                <div class="code-box-title">Request Payload</div>
+                <pre id="preReqBody"></pre>
+              </div>
+              <div class="code-box mt-8">
+                <div class="code-box-title">JavaScript <code>fetch()</code> Tái Hiện</div>
+                <pre id="preFetchSnippet"></pre>
+              </div>
+            </div>
+
+            <div class="sub-pane" id="sub-headers">
+              <div class="diff-columns">
+                <div class="code-box">
+                  <div class="code-box-title">Request Headers</div>
+                  <pre id="preReqHeaders"></pre>
+                </div>
+                <div class="code-box">
+                  <div class="code-box-title">Response Headers</div>
+                  <pre id="preResHeaders"></pre>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- TAB 2: FRONTEND CRASH-TEST SANDBOX (v2.0 EXPANDED)                 -->
+    <!-- ================================================================== -->
+    <section class="tab-pane" id="tab-lab">
+      <div class="lab-intro-banner">
+        <div>
+          <h3>🧪 Đấu Trường Va Đập Toàn Diện v2.0: REST · AI Stream · WebSocket · 401 Mutex · GraphQL</h3>
+          <p>
+            Ứng dụng <b>PayFlow Mini Store</b> bên dưới kết nối thật 100% qua cổng Proxy <code>http://localhost:4191</code> &amp; <code>ws://localhost:4191</code>.
+            Chuyển đổi giữa <b>❌ Code Ngây Thơ</b> và <b>🛡️ Code Phòng Thủ</b> để kiểm chứng trực tiếp sức chịu đựng!
+          </p>
+        </div>
+        <div class="ui-armor-toggle">
+          <button class="armor-btn active-fragile" id="btnModeFragile">❌ Code Ngây Thơ (Fragile UI)</button>
+          <button class="armor-btn" id="btnModeResilient">🛡️ Code Phòng Thủ (Resilient UI)</button>
+        </div>
+      </div>
+
+      <div class="lab-grid">
+        <!-- SIMULATED REAL FRONTEND APP -->
+        <div class="panel victim-app-shell" id="victimAppShell">
+          <div class="victim-topbar">
+            <div>
+              <span class="victim-brand">💳 PayFlow SuperApp v2</span>
+              <span class="armor-indicator fragile" id="victimArmorBadge">CHẾ ĐỘ NGÂY THƠ</span>
+            </div>
+            <div class="victim-actions">
+              <button class="btn-mini" id="btnVictimReload">🔄 Tải Lại</button>
+              <button class="btn-mini" id="btnVictimTrack">📦 Tiến Độ Đơn</button>
+              <button class="btn-mini" id="btnVictimResetStore">♻️ Reset Ví</button>
+            </div>
+          </div>
+
+          <!-- v2.0 Protocol Stress Probe Bar -->
+          <div class="v2-probes-bar">
+            <button class="btn-mini btn-accent" id="btnProbeAiStream">🤖 Hỏi AI Tư Vấn (SSE Stream)</button>
+            <button class="btn-mini btn-accent" id="btnProbeWsToggle">📡 Kết Nối Ticker (WebSocket)</button>
+            <button class="btn-mini btn-accent" id="btnProbeAuthBurst">🔐 Bắn 4 API Cùng Lúc Dính 401</button>
+            <button class="btn-mini btn-accent" id="btnProbeGraphql">🕸️ Truy Vấn GraphQL</button>
+          </div>
+
+          <!-- White-Screen-of-Death Crash Overlay -->
+          <div id="victimCrashScreen" class="victim-crash hidden">
+            <div class="crash-title">💥 UNCAUGHT RUNTIME EXCEPTION — TRẮNG TRANG GIAO DIỆN!</div>
+            <pre id="victimCrashStack"></pre>
+            <p class="crash-hint">
+              💡 Chuyển sang <b>🛡️ Code Phòng Thủ</b> ở góc phải phía trên rồi thử lại để xem cơ chế tự phục hồi!
+            </p>
+          </div>
+
+          <div id="victimAppBody" class="victim-body">
+            <!-- Wallet & User Summary -->
+            <div class="victim-wallet-bar" id="victimWalletBar">
+              <div>
+                <div class="vw-user" id="vwUserName">Đang tải hồ sơ...</div>
+                <div class="vw-sub" id="vwSourceInfo">Qua Proxy :4191</div>
+                <div class="vw-ws-line" id="vwWsTickerLine">📡 WebSocket Ticker: Chưa kết nối</div>
+              </div>
+              <div class="vw-balance-box">
+                <span>Số dư Ví Khả Dụng</span>
+                <strong id="vwBalance">-- ₫</strong>
+              </div>
+            </div>
+
+            <!-- AI Assistant Stream Output Box -->
+            <div id="victimAiBox" class="victim-track-box hidden"></div>
+
+            <!-- Status Banner inside App -->
+            <div id="victimStatusNotice" class="victim-notice hidden"></div>
+
+            <!-- Order Tracking / Auth / GQL Output -->
+            <div id="victimTrackBox" class="victim-track-box hidden"></div>
+
+            <!-- Products Grid -->
+            <div class="victim-section-head">
+              <h4>🔥 Sản Phẩm Flash Sale Hôm Nay</h4>
+              <button class="btn btn-primary" id="btnVictimCheckout">
+                💳 Thanh Toán Nhanh (4.290.000 ₫)
+              </button>
+            </div>
+            <div id="victimProductsGrid" class="victim-products-grid"></div>
+          </div>
+        </div>
+
+        <!-- RIGHT SIDE: AUTOMATED 8-VECTOR RESILIENCE BENCHMARK & CONSOLE -->
+        <div class="panel benchmark-panel">
+          <div class="panel-header">
+            <h3>🏆 Máy Sát Hạch Độ Bền Tự Động (7 Bài Test Thực Chiến)</h3>
+            <button class="btn btn-primary" id="btnRunBenchmark">🚀 Chạy Sát Hạch Tự Động</button>
+          </div>
+
+          <p class="panel-desc">
+            Tự động chạy 7 bài kiểm định qua cổng Proxy <code>:4191</code> (<i>Baseline, Bão 429, Nullify JSON, Cắt cụt JSON, Treo Timeout, Chống Trừ Tiền Đúp &amp; Chống Bão Refresh 401 Song Song</i>):
+          </p>
+
+          <div class="score-banner" id="benchScoreBanner">
+            <div class="score-circle" id="benchScoreCircle">--</div>
+            <div>
+              <strong id="benchVerdictTitle">Chưa chạy bài sát hạch</strong>
+              <p id="benchVerdictSub">Chọn Code Ngây Thơ hoặc Code Phòng Thủ rồi bấm "Chạy Sát Hạch Tự Động".</p>
+            </div>
+          </div>
+
+          <div class="bench-results-list" id="benchResultsList"></div>
+
+          <div class="panel-header mt-12">
+            <h4>📋 Nhật Ký Hành Vi Giao Diện (Client Telemetry Log)</h4>
+            <button class="btn-mini" id="btnClearVictimLog">Xóa Log</button>
+          </div>
+          <div class="victim-console" id="victimConsole"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- TAB 3 (NEW v2.0): CHAOS TIMELINE STORYBOARD, REPORT & OPENAPI 3.0  -->
+    <!-- ================================================================== -->
+    <section class="tab-pane" id="tab-timeline">
+      <div class="integrate-grid">
+        <!-- LEFT: GAMEDAY TIMELINE RUNNER & MARKDOWN REPORT -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>🎬 Kịch Bản Hỗn Loạn Theo Dòng Thời Gian (GameDay Storyboard)</h3>
+            <button class="btn-mini btn-danger hidden" id="btnStopTimeline">⏹ Dừng Ngay</button>
+          </div>
+          <p class="panel-desc">
+            Bấm chạy để ChaosForge tự động chuyển pha theo từng mốc giây (từ mạng êm ➔ nghẽn 3G ➔ sập 502/429 ➔ cắt WebSocket ➔ tự phục hồi) trong khi bạn thao tác trên ứng dụng Frontend:
+          </p>
+
+          <div id="timelineTemplatesList" class="rules-list"></div>
+
+          <div class="panel-header mt-12">
+            <h3>📝 Báo Cáo Kiểm Định Độ Bền Hệ Thống (Markdown Report)</h3>
+            <div class="panel-actions">
+              <button class="btn-mini btn-accent" id="btnGenerateReport">🔄 Tổng Hợp Báo Cáo</button>
+              <button class="btn-mini" id="btnDownloadReport">📥 Tải File .MD</button>
+            </div>
+          </div>
+          <div class="code-box">
+            <pre id="preMarkdownReport">Bấm "🔄 Tổng Hợp Báo Cáo" để trích xuất bảng phân tích P50/P95, lỗi Double-Submit, 401 Race &amp; danh sách sự cố...</pre>
+          </div>
+        </div>
+
+        <!-- RIGHT: AUTO-OPENAPI 3.0 SCHEMA HARVESTER -->
+        <div class="panel">
+          <div class="panel-header">
+            <h3>📐 Tự Động Suy Luận OpenAPI 3.0 Schema Từ Lưu Lượng Bắt Được</h3>
+            <div class="panel-actions">
+              <button class="btn-mini btn-accent" id="btnHarvestOpenApi">🔍 Quét &amp; Sinh OpenAPI 3.0</button>
+              <button class="btn-mini" id="btnDownloadOpenApi">📤 Tải openapi.json</button>
+            </div>
+          </div>
+          <p class="panel-desc">
+            ChaosForge tự động gom các cặp Request/Response đi qua Proxy và trong Cassette để gom tham số động (<code>/orders/{id}</code>), suy luận kiểu JSON (<code>integer</code>, <code>nullable</code>, <code>array</code>) và xuất chuẩn <b>OpenAPI 3.0.3</b>:
+          </p>
+          <div id="openApiSummaryPill" class="mutation-banner hidden"></div>
+          <div class="code-box">
+            <div class="code-box-title">Đặc tả OpenAPI 3.0.3 (JSON)</div>
+            <pre id="preOpenApiSpec" style="max-height: 440px;">Bấm "🔍 Quét &amp; Sinh OpenAPI 3.0" để xem đặc tả API được suy luận tự động...</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- TAB 4: PER-ENDPOINT CHAOS & DYNAMIC MOCK STUDIO                    -->
+    <!-- ================================================================== -->
+    <section class="tab-pane" id="tab-rules">
+      <div class="rules-layout">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>⚡ Danh Sách Luật Theo Đường Dẫn (Ưu tiên từ trên xuống)</h3>
+            <button class="btn btn-primary" id="btnNewRule">+ Tạo Luật Mới</button>
+          </div>
+          <div id="rulesListContainer" class="rules-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3 id="ruleEditorTitle">✏️ Trình Soạn Thảo Luật / Mock Endpoint</h3>
+          </div>
+          <form id="ruleForm" class="rule-form">
+            <input type="hidden" id="ruleIdInput" />
+            <div class="form-row-2">
+              <div class="form-group">
+                <label>Tên Luật Gợi Nhớ</label>
+                <input type="text" id="ruleNameInput" required placeholder="VD: Giả lập hết hàng /checkout" />
+              </div>
+              <div class="form-group">
+                <label>Hành Động (Action Mode)</label>
+                <select id="ruleActionInput">
+                  <option value="MOCK">🎭 MOCK ĐỘNG — Trả thẳng JSON giả lập (Không cần Backend)</option>
+                  <option value="CHAOS">🔥 CHAOS RIÊNG — Tiêm độ trễ / tỷ lệ lỗi cho riêng đường dẫn này</option>
+                  <option value="BREAKPOINT">⏸ BREAKPOINT — Luôn bắt sống gói tin đường dẫn này để sửa tay</option>
+                  <option value="PASSTHROUGH">🟢 PASSTHROUGH — Miễn nhiễm mọi Chaos cho đường dẫn này</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row-3">
+              <div class="form-group">
+                <label>HTTP Method</label>
+                <select id="ruleMethodInput">
+                  <option value="ALL">ALL (Mọi Method)</option>
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                  <option value="PUT">PUT</option>
+                  <option value="PATCH">PATCH</option>
+                  <option value="DELETE">DELETE</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Path Pattern (Hỗ trợ <code>*</code> và <code>:id</code>)</label>
+                <input type="text" id="rulePatternInput" required placeholder="/users/:id hoặc /checkout*" spellcheck="false" />
+              </div>
+              <div class="form-group">
+                <label>HTTP Status Trả Về</label>
+                <input type="number" id="ruleStatusInput" value="200" min="100" max="599" />
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label>Độ Trễ Cố Định Cho Route Này (ms)</label>
+                <input type="number" id="ruleDelayInput" value="0" min="0" max="30000" />
+              </div>
+              <div class="form-group">
+                <label>Xác Suất Trả Lỗi HTTP (Khi Action = CHAOS, %)</label>
+                <input type="number" id="ruleErrorRateInput" value="0" min="0" max="100" />
+              </div>
+            </div>
+
+            <div class="form-group">
+              <div class="label-with-link">
+                <label>Payload Trả Về (Hỗ trợ <code>{{uuid}}</code>, <code>{{isoDate}}</code>, <code>{{randInt}}</code>, <code>{{req.params.id}}</code>, <code>{{req.query.q}}</code>, <code>{{req.body.amount}}</code>):</label>
+                <div class="template-vars">
+                  <button type="button" class="btn-link" data-insert-var="{{uuid}}">+uuid</button>
+                  <button type="button" class="btn-link" data-insert-var="{{isoDate}}">+isoDate</button>
+                  <button type="button" class="btn-link" data-insert-var="{{req.params.id}}">+params.id</button>
+                </div>
+              </div>
+              <textarea id="ruleBodyInput" rows="10" spellcheck="false"></textarea>
+            </div>
+
+            <div class="rule-form-actions">
+              <button type="submit" class="btn btn-primary">💾 Lưu Luật Endpoint</button>
+              <button type="button" class="btn" id="btnResetRuleForm">Làm Mới Form</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- TAB 5: SESSION RECORDER, OFFLINE CASSETTE & CHROME .HAR STUDIO     -->
+    <!-- ================================================================== -->
+    <section class="tab-pane" id="tab-cassettes">
+      <div class="cassettes-layout">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>📼 Kho Cuộn Băng Phiên API &amp; Nhập .HAR</h3>
+            <div class="panel-actions">
+              <button class="btn-mini btn-accent" id="btnCreateCassette">+ Tạo &amp; Ghi Băng</button>
+              <label class="btn-mini btn-accent file-btn" title="Nhập tệp .HAR xuất từ Chrome DevTools Network tab">
+                🌐 Nhập Chrome .HAR <input type="file" id="inpImportHar" accept=".har,.json" hidden />
+              </label>
+              <label class="btn-mini file-btn">
+                📥 Nhập Cassette <input type="file" id="inpImportCassette" accept=".json" hidden />
+              </label>
+            </div>
+          </div>
+
+          <div class="offline-options-box">
+            <label class="inline-check">
+              <input type="checkbox" id="chkReplayLatency" /> Giữ nguyên độ trễ gốc khi phát lại Offline
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" id="chkReplayChaos" /> Kết hợp hiệu ứng Chaos &amp; Đột biến JSON lên băng Offline
+            </label>
+            <label class="inline-check">
+              <input type="checkbox" id="chkAutoFallbackOffline" /> Tự động dùng băng Offline nếu Backend thật bị sập
+            </label>
+          </div>
+
+          <div id="cassettesList" class="cassettes-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3 id="cassetteDetailTitle">🎞️ Các Bản Ghi Trong Cuộn Băng Đang Chọn</h3>
+            <div class="panel-actions">
+              <button class="btn-mini" id="btnResetCassetteCursor" title="Đặt lại thứ tự phát tuần tự về bước 1">⏮ Tua Đầu Băng</button>
+              <button class="btn-mini" id="btnExportCassetteHar" title="Xuất cuộn băng này thành tệp .HAR chuẩn">📤 Xuất .HAR</button>
+              <button class="btn-mini" id="btnExportCassette">📤 Xuất .JSON</button>
+            </div>
+          </div>
+
+          <div id="cassetteEntriesWrap" class="cassette-entries-wrap"></div>
+
+          <!-- Inline Editor for a Selected Recorded Entry -->
+          <div id="cassetteEntryEditor" class="cassette-entry-editor hidden">
+            <div class="panel-header">
+              <h4 id="casEntryEditHeader">Sửa Bản Ghi Trong Băng</h4>
+              <button class="btn-mini btn-accent" id="btnSaveCassetteEntry">💾 Lưu Thay Đổi Vào Băng</button>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label>Status Code</label>
+                <input type="number" id="casEntryStatus" value="200" />
+              </div>
+              <div class="form-group">
+                <label>Độ Trễ Gốc (ms)</label>
+                <input type="number" id="casEntryMs" value="40" />
+              </div>
+            </div>
+            <div class="form-group">
+              <label>Nội Dung JSON Ghi Trong Băng:</label>
+              <textarea id="casEntryBody" rows="8" spellcheck="false"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================== -->
+    <!-- TAB 6: FLOATING HUD WIDGET & INTEGRATION RECIPES                   -->
+    <!-- ================================================================== -->
+    <section class="tab-pane" id="tab-integrate">
+      <div class="integrate-grid">
+        <div class="panel">
+          <div class="panel-header">
+            <h3>💉 Nhúng Thanh Điều Khiển Nổi (Floating Chaos HUD) Bằng 1 Dòng Script</h3>
+            <button class="btn-mini btn-accent" id="btnPreviewHudHere">✨ Bật Thử HUD Ngay Góc Trái Màn Hình</button>
+          </div>
+          <p class="panel-desc">
+            Dán duy nhất 1 dòng dưới đây vào <code>index.html</code> của dự án React / Vue / Next.js. Một nút nổi cô lập bằng <b>Shadow DOM</b> sẽ hiện ngay góc dưới bên trái ứng dụng của bạn để gạt Lag 3s, 429, Offline, Hết hạn 401 hoặc Cắt WebSocket mà không cần rời tab:
+          </p>
+
+          <div class="code-box">
+            <div class="code-box-title">Nhúng vào <code>index.html</code> của dự án đang phát triển</div>
+            <pre><code id="codeHudTag">&lt;script src="http://localhost:4190/chaos-hud.js"&gt;&lt;/script&gt;</code></pre>
+          </div>
+
+          <div class="code-box mt-12">
+            <div class="code-box-title">Cấu hình Proxy cho cả HTTP &amp; WebSocket trong <code>vite.config.ts</code></div>
+            <pre><code>export default defineConfig({
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:4191',
+        changeOrigin: true
+      },
+      '/ws': {
+        target: 'ws://localhost:4191',
+        ws: true
+      }
+    }
+  }
+});</code></pre>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-header">
+            <h3>🛡️ Mẫu Hàm <code>fetchResilient()</code> + <code>AuthRefreshMutex</code> Chuẩn Thực Chiến</h3>
+            <button class="btn-mini btn-accent" id="btnCopyResilientCode">📋 Copy Trọn Bộ</button>
+          </div>
+          <div class="code-box">
+            <pre id="preResilientPattern" style="max-height: 420px;"><code>// 1. Mutex chống bão gọi lặp /auth/refresh khi nhiều API cùng nhận 401
+let refreshPromise = null;
+async function getFreshAccessToken(refreshUrl) {
+  if (!refreshPromise) {
+    refreshPromise = fetch(refreshUrl, { method: 'POST' })
+      .then((r) => r.json())
+      .then((d) => d.accessToken)
+      .finally(() => { refreshPromise = null; });
+  }
+  return refreshPromise;
+}
+
+// 2. Wrapper Fetch chống bão 429/503, Timeout AbortController, 401 Mutex & Idempotency
+export async function fetchResilient(url, options = {}) {
+  const { timeoutMs = 5000, maxRetries = 2, idempotent = false, refreshUrl = '', ...fetchOpts } = options;
+  const headers = new Headers(fetchOpts.headers || {});
+  if (idempotent && !headers.has('X-Idempotency-Key')) {
+    headers.set('X-Idempotency-Key', crypto.randomUUID());
+  }
+
+  let lastError;
+  for (let attempt = 0; attempt &lt;= maxRetries; attempt++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() =&gt; controller.abort(), timeoutMs);
+    try {
+      let res = await fetch(url, { ...fetchOpts, headers, signal: controller.signal });
+      clearTimeout(timer);
+
+      if (res.status === 401 &amp;&amp; refreshUrl &amp;&amp; attempt === 0) {
+        const newToken = await getFreshAccessToken(refreshUrl);
+        headers.set('Authorization', `Bearer ${newToken}`);
+        continue;
+      }
+
+      if ([429, 502, 503, 504].includes(res.status) &amp;&amp; attempt &lt; maxRetries) {
+        const retryAfter = Number(res.headers.get('Retry-After')) || 0;
+        await new Promise((r) =&gt; setTimeout(r, retryAfter &gt; 0 ? retryAfter * 1000 : 350 * Math.pow(2, attempt)));
+        continue;
+      }
+
+      const rawText = await res.text();
+      let data;
+      try { data = rawText ? JSON.parse(rawText) : null; }
+      catch { throw new Error(`MALFORMED_JSON_RESPONSE (HTTP ${res.status})`); }
+
+      if (!res.ok) throw new Error(data?.message || `HTTP_ERROR_${res.status}`);
+      return data;
+    } catch (err) {
+      clearTimeout(timer);
+      lastError = err.name === 'AbortError' ? new Error(`REQUEST_TIMEOUT_${timeoutMs}MS`) : err;
+      if (attempt &lt; maxRetries) await new Promise((r) =&gt; setTimeout(r, 300 * Math.pow(2, attempt)));
+    }
+  }
+  throw lastError;
+}</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="toastContainer" class="toast-container"></div>
+  <script src="/app.js"></script>
+</body>
+</html>
